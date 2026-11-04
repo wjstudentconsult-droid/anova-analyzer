@@ -1,0 +1,164 @@
+<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ANOVA Analyzer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f4f6fb;--c:#fff;--t:#1e2535;--p:#3b5bdb;--b:#d8deea}
+@media(prefers-color-scheme:dark){:root{--bg:#141824;--c:#1e2435;--t:#e6e9f2;--p:#748ffc;--b:#37405a}}
+*{box-sizing:border-box}body{margin:0;font-family:Sarabun,Tahoma,sans-serif;background:var(--bg);color:var(--t);padding:16px}
+.w{max-width:1100px;margin:auto}.card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:16px;margin-bottom:14px}
+h1{margin:0 0 12px;font-size:22px}h2{font-size:16px;margin:0 0 10px;color:var(--p)}h3{font-size:14px;margin:14px 0 6px}
+button{font:inherit;border:1px solid var(--b);background:var(--c);color:var(--t);padding:7px 12px;border-radius:8px;cursor:pointer;margin:3px}
+button.on,button.pr{background:var(--p);color:#fff;border-color:var(--p)}button.dg{border-color:#e03131;color:#e03131}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}select{width:100%;min-height:110px;background:var(--c);color:var(--t);border:1px solid var(--b);border-radius:8px}
+.tb{overflow-x:auto}table{border-collapse:collapse;font-size:13px;min-width:60%}th,td{border:1px solid var(--b);padding:4px 8px;text-align:right}th{background:rgba(120,140,200,.18)}td:first-child,th:first-child{text-align:left}
+.hint{font-size:13px;opacity:.8;margin:6px 0}.err{color:#e03131;font-weight:600}li{margin:3px 0;font-size:14px}
+.ch{max-width:720px}.cd{font-size:13px;opacity:.85;margin-top:6px}
+</style></head><body><div class="w">
+<h1>📊 <span class="l" data-th="เครื่องมือวิเคราะห์สถิติตระกูล ANOVA" data-en="ANOVA-Family Statistical Toolkit"></span></h1>
+<div class="card"><h2>1. <span class="l" data-th="เลือกประเภทการวิเคราะห์" data-en="Select analysis"></span></h2><div id="ms"></div><div class="hint" id="mh"></div></div>
+<div class="card"><h2>2. <span class="l" data-th="แนบไฟล์ข้อมูล Excel / CSV" data-en="Upload Excel / CSV data"></span></h2>
+<input type="file" id="fi" accept=".xlsx,.xls,.csv"> <button id="sb"><span class="l" data-th="ใช้ข้อมูลตัวอย่าง" data-en="Use sample data"></span></button>
+<div class="hint" id="di"></div>
+<div class="g"><div><b class="l" data-th="ตัวแปรตาม (DV)" data-en="Dependent (DV)"></b><select id="sDV" multiple></select></div>
+<div><b class="l" data-th="ตัวแปรกลุ่ม (Factor)" data-en="Factor(s)"></b><select id="sF" multiple></select></div>
+<div><b class="l" data-th="ตัวแปรร่วม (Covariate)" data-en="Covariate(s)"></b><select id="sC" multiple></select></div></div>
+<div class="hint l" data-th="กด Ctrl/Cmd ค้างเพื่อเลือกหลายตัวแปร" data-en="Hold Ctrl/Cmd to select multiple variables"></div></div>
+<div class="card"><h2>3. <span class="l" data-th="ภาษาที่แสดงผล" data-en="Output language"></span></h2><button id="lt" class="on">ไทย</button><button id="le">English</button>
+<hr style="border:0;border-top:1px solid var(--b)"><button class="pr" id="run">▶ <span class="l" data-th="ประมวลผล" data-en="Run analysis"></span></button><button class="dg" id="rs">↺ Reset</button></div>
+<div id="out"></div></div>
+<script>
+let lang='th',DATA=null,sample=false,method='oneway',LAST=null,charts=[];
+const T=(a,b)=>lang=='th'?a:b,$=id=>document.getElementById(id);
+const sum=a=>a.reduce((s,v)=>s+v,0),mean=a=>sum(a)/a.length,sd=a=>a.length>1?Math.sqrt(sum(a.map(v=>(v-mean(a))**2))/(a.length-1)):0;
+const f=(x,d=3)=>isFinite(x)?(+x).toFixed(d):'-',pf=p=>p<.001?'<.001':f(p);
+// ---- distributions
+function lg(x){const c=[76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,.1208650973866179e-2,-.5395239384953e-5];let y=x,t=x+5.5;t-=(x+.5)*Math.log(t);let s=1.000000000190015;for(const v of c)s+=v/++y;return -t+Math.log(2.5066282746310005*s/x)}
+function bcf(a,b,x){const q=a+b,qp=a+1,qm=a-1,tn=1e-30;let c=1,d=1-q*x/qp;if(Math.abs(d)<tn)d=tn;d=1/d;let h=d;for(let m=1;m<=200;m++){const m2=2*m;let aa=m*(b-m)*x/((qm+m2)*(a+m2));d=1+aa*d;if(Math.abs(d)<tn)d=tn;c=1+aa/c;if(Math.abs(c)<tn)c=tn;d=1/d;h*=d*c;aa=-(a+m)*(q+m)*x/((a+m2)*(qp+m2));d=1+aa*d;if(Math.abs(d)<tn)d=tn;c=1+aa/c;if(Math.abs(c)<tn)c=tn;d=1/d;const dl=d*c;h*=dl;if(Math.abs(dl-1)<3e-12)break}return h}
+function ib(x,a,b){if(x<=0)return 0;if(x>=1)return 1;const bt=Math.exp(lg(a+b)-lg(a)-lg(b)+a*Math.log(x)+b*Math.log(1-x));return x<(a+1)/(a+b+2)?bt*bcf(a,b,x)/a:1-bt*bcf(b,a,1-x)/b}
+const pF=(F,d1,d2)=>F<=0||!isFinite(F)?1:ib(d2/(d2+d1*F),d2/2,d1/2),pT=(t,d)=>ib(d/(d+t*t),d/2,.5);
+const tq=df=>{let lo=0,hi=200;for(let i=0;i<60;i++){const m=(lo+hi)/2;pT(m,df)>.05?lo=m:hi=m}return lo};
+function erf(x){const s=x<0?-1:1;x=Math.abs(x);const t=1/(1+.3275911*x);return s*(1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-.284496736)*t+.254829592)*t*Math.exp(-x*x))}
+const nq=p=>{let lo=-8,hi=8;for(let i=0;i<40;i++){const m=(lo+hi)/2;.5*(1+erf(m/Math.SQRT2))<p?lo=m:hi=m}return lo};
+// ---- matrices
+const mm=(A,B)=>A.map(r=>B[0].map((_,j)=>r.reduce((s,v,k)=>s+v*B[k][j],0))),tr=A=>A[0].map((_,j)=>A.map(r=>r[j]));
+function inv(A){const n=A.length,M=A.map((r,i)=>[...r,...Array.from({length:n},(_,j)=>+(i==j))]);for(let i=0;i<n;i++){let p=i;for(let r=i+1;r<n;r++)if(Math.abs(M[r][i])>Math.abs(M[p][i]))p=r;[M[i],M[p]]=[M[p],M[i]];const d=M[i][i];if(Math.abs(d)<1e-10)return null;for(let j=0;j<2*n;j++)M[i][j]/=d;for(let r=0;r<n;r++)if(r!=i){const k=M[r][i];if(k)for(let j=0;j<2*n;j++)M[r][j]-=k*M[i][j]}}return M.map(r=>r.slice(n))}
+function det(A){const n=A.length,M=A.map(r=>[...r]);let d=1;for(let i=0;i<n;i++){let p=i;for(let r=i+1;r<n;r++)if(Math.abs(M[r][i])>Math.abs(M[p][i]))p=r;if(!M[p][i])return 0;if(p!=i){[M[i],M[p]]=[M[p],M[i]];d=-d}d*=M[i][i];for(let r=i+1;r<n;r++){const k=M[r][i]/M[i][i];for(let j=i;j<n;j++)M[r][j]-=k*M[i][j]}}return d}
+// ---- GLM (Type III SS via effect coding)
+function fit(Y,X){const Xt=tr(X),A=inv(mm(Xt,X));if(!A)return null;const B=mm(A,mm(Xt,Y)),ft=mm(X,B),res=Y.map((r,i)=>r.map((v,j)=>v-ft[i][j]));return{E:mm(tr(res),res),fit:ft,res}}
+function design(rows,fa,co){const one=rows.map(()=>1),fc={};fa.forEach(a=>{const lv=[...new Set(rows.map(r=>r[a]))].sort(),last=lv.at(-1);fc[a]=lv.slice(0,-1).map(l=>rows.map(r=>r[a]==l?1:r[a]==last?-1:0))});
+const subs=[];for(let m=1;m<(1<<fa.length);m++)subs.push(fa.filter((_,i)=>m>>i&1));subs.sort((a,b)=>a.length-b.length);const terms=[];
+subs.forEach(s=>{let cs=[one];s.forEach(a=>{const n=[];cs.forEach(c=>fc[a].forEach(g=>n.push(c.map((v,i)=>v*g[i]))));cs=n});terms.push({name:s.join('×'),cols:cs.slice()})});
+co.forEach(c=>{const m=mean(rows.map(r=>r[c]));terms.push({name:c,cols:[rows.map(r=>r[c]-m)]})});return{i:one,terms}}
+function glm(rows,dv,fa,co){const D=design(rows,fa,co),n=rows.length,Y=rows.map(r=>dv.map(d=>r[d]));
+const bd=ex=>tr([D.i,...D.terms.filter(t=>t!==ex).flatMap(t=>t.cols)]),X=bd(null),F=fit(Y,X);if(!F)return null;const dfe=n-X[0].length;if(dfe<1)return null;
+const o={n,dfe,dfm:X[0].length-1,E:F.E,fit:F.fit,res:F.res,terms:[]};
+for(const t of D.terms){const R=fit(Y,bd(t));if(!R)return null;o.terms.push({name:t.name,df:t.cols.length,H:R.E.map((r,i)=>r.map((v,j)=>v-F.E[i][j]))})}return o}
+function owF(g){const N=sum(g.map(a=>a.length)),k=g.length,gm=mean(g.flat());let b=0,w=0;g.forEach(a=>{const m=mean(a);b+=a.length*(m-gm)**2;a.forEach(v=>w+=(v-m)**2)});const d1=k-1,d2=N-k,F=(b/d1)/(w/d2);return{F,d1,d2,p:pF(F,d1,d2)}}
+const grp=(rows,fa)=>{const m=new Map();rows.forEach(r=>{const k=fa.map(a=>r[a]).join(' | ');(m.get(k)||m.set(k,[]).get(k)).push(r)});return new Map([...m].sort((a,b)=>a[0]<b[0]?-1:1))};
+const eff=e=>e>=.14?T('ขนาดใหญ่','large'):e>=.06?T('ขนาดปานกลาง','medium'):e>=.01?T('ขนาดเล็ก','small'):T('เล็กน้อยมาก','negligible');
+const say=(nm,F,a,b,p,e)=>`<b>${nm}</b>: F(${f(a,0)}, ${f(b,0)}) = ${f(F)}, p = ${pf(p)}, η²p = ${f(e)} → `+(p<.05?T(`มีนัยสำคัญทางสถิติที่ระดับ .05 (ขนาดอิทธิพล${eff(e)})`,`statistically significant at .05 (${eff(e)} effect)`):T('ไม่มีนัยสำคัญทางสถิติที่ระดับ .05','not significant at .05'));
+const ZH=()=>[T('แหล่งความแปรปรวน','Source'),'SS','df','MS','F','p','η²p'];
+// ---- methods
+const M={oneway:['One-Way ANOVA','เลือก DV 1 ตัว, Factor 1 ตัว','Select 1 DV, 1 factor',[1,1,1,1,0,0]],
+welch:['Welch ANOVA','เลือก DV 1 ตัว, Factor 1 ตัว (ไม่ต้องสมมติความเท่ากันของความแปรปรวน)','1 DV, 1 factor (unequal variances)',[1,1,1,1,0,0]],
+twoway:['Two-Way ANOVA','DV 1 ตัว, Factor 2 ตัว (รวมปฏิสัมพันธ์)','1 DV, 2 factors (with interaction)',[1,1,2,2,0,0]],
+nway:['Factorial / Three-Way ANOVA','DV 1 ตัว, Factor 3 ตัวขึ้นไป','1 DV, 3+ factors',[1,1,3,5,0,0]],
+ancova:['ANCOVA','DV 1 ตัว, Factor ≥1, Covariate ≥1','1 DV, ≥1 factor, ≥1 covariate',[1,1,1,5,1,5]],
+rm:['Repeated Measures ANOVA','เลือก DV หลายคอลัมน์ = การวัดซ้ำแต่ละครั้ง (ข้อมูลแบบ wide)','Select several DV columns = each repeated measure (wide format)',[2,20,0,0,0,0]],
+manova:['MANOVA','DV ≥2, Factor ≥1','≥2 DVs, ≥1 factor',[2,9,1,5,0,0]],
+mancova:['MANCOVA','DV ≥2, Factor ≥1, Covariate ≥1','≥2 DVs, ≥1 factor, ≥1 covariate',[2,9,1,5,1,5]]};
+function drawM(){$('ms').innerHTML=Object.keys(M).map(k=>`<button data-m="${k}" class="${k==method?'on':''}">${M[k][0]}</button>`).join('');$('mh').textContent=T(M[method][1],M[method][2]);
+$('ms').querySelectorAll('button').forEach(b=>b.onclick=()=>{method=b.dataset.m;drawM();defSel()})}
+function setLang(l){lang=l;document.documentElement.lang=l;document.querySelectorAll('.l').forEach(e=>e.textContent=e.dataset[l]);$('lt').classList.toggle('on',l=='th');$('le').classList.toggle('on',l=='en');drawM();showInfo();if(LAST)run()}
+// ---- data
+function showInfo(){$('di').textContent=DATA?T(`โหลดข้อมูลแล้ว ${DATA.rows.length} แถว, ${DATA.cols.length} คอลัมน์: `,`Loaded ${DATA.rows.length} rows, ${DATA.cols.length} columns: `)+DATA.cols.join(', '):T('ยังไม่ได้โหลดข้อมูล (แถวแรกคือชื่อตัวแปร)','No data loaded (first row = variable names)')}
+function setData(rows,s){DATA={rows,cols:Object.keys(rows[0]||{})};sample=s;['sDV','sF','sC'].forEach(i=>$(i).innerHTML=DATA.cols.map(c=>`<option>${c}</option>`).join(''));showInfo();defSel()}
+function defSel(){if(!sample||!DATA)return;const d={oneway:[['Score1'],['Group'],[]],welch:[['Score1'],['Group'],[]],twoway:[['Score1'],['Group','Gender'],[]],nway:[['Score1'],['Group','Gender','Class'],[]],ancova:[['Score1'],['Group'],['Pretest']],rm:[['Score1','Score2','Score3'],[],[]],manova:[['Score1','Score2'],['Group'],[]],mancova:[['Score1','Score2'],['Group'],['Pretest']]}[method];['sDV','sF','sC'].forEach((id,i)=>[...$(id).options].forEach(o=>o.selected=d[i].includes(o.value)))}
+$('fi').onchange=e=>{const fl=e.target.files[0];if(!fl)return;const r=new FileReader();r.onload=ev=>{try{const wb=XLSX.read(ev.target.result,{type:'array'});setData(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}),false)}catch(x){$('di').innerHTML='<span class=err>'+x.message+'</span>'}};r.readAsArrayBuffer(fl)};
+$('sb').onclick=()=>{let s=12345;const u=()=>(s=(s*16807)%2147483647)/2147483647,nr=()=>Math.sqrt(-2*Math.log(u()))*Math.cos(6.2832*u()),rows=[];
+for(let i=0;i<60;i++){const g=i%3,fm=i%2,pre=50+8*nr(),s1=20+.5*pre+[0,4,8][g]+2*fm+((i>>1)%2?1.5:0)+4*nr(),s2=s1+3+[0,2,5][g]+2*nr(),s3=s2+2+2*nr();rows.push({Group:'ABC'[g],Gender:fm?'F':'M',Class:(i>>1)%2?'X':'Y',Pretest:+pre.toFixed(1),Score1:+s1.toFixed(1),Score2:+s2.toFixed(1),Score3:+s3.toFixed(1)})}setData(rows,true)};
+const sel=id=>[...$(id).selectedOptions].map(o=>o.value);
+// ---- analysis
+function run(){try{LAST=1;destroy();const o=analyze();render(o)}catch(x){$('out').innerHTML='<div class="card err">'+x.message+'</div>'}}
+function analyze(){if(!DATA)throw Error(T('กรุณาแนบไฟล์หรือใช้ข้อมูลตัวอย่างก่อน','Please upload a file or use sample data first'));
+const dv=sel('sDV'),fa=sel('sF'),co=sel('sC'),r=M[method][3],ns=[dv,fa,co];
+for(let i=0;i<3;i++)if(ns[i].length<r[2*i]||ns[i].length>r[2*i+1])throw Error(T('การเลือกตัวแปรไม่ตรงกับวิธีที่เลือก: ','Variable selection does not match method: ')+T(M[method][1],M[method][2]));
+if(new Set([...dv,...fa,...co]).size<dv.length+fa.length+co.length)throw Error(T('ห้ามเลือกตัวแปรซ้ำกันในหลายช่อง','A variable cannot be in more than one box'));
+const rows=DATA.rows.map(w=>{const o={};for(const c of [...dv,...co]){const v=w[c];if(v===''||v==null||!isFinite(+v))return null;o[c]=+v}for(const c of fa){if(w[c]===''||w[c]==null)return null;o[c]=String(w[c])}return o}).filter(Boolean);
+if(rows.length<4)throw Error(T('ข้อมูลที่ใช้ได้น้อยเกินไป','Too few valid rows'));
+const o={tables:[],notes:[],charts:[]},tt=(t,head,rw)=>o.tables.push({t,head,rows:rw}),pm=(a,b)=>{const m=[];a.forEach((x,i)=>a.forEach((y,j)=>i<j&&m.push([x,y])));return m};
+o.notes.push(T(`ใช้ข้อมูลที่สมบูรณ์ ${rows.length} จาก ${DATA.rows.length} แถว`,`Used ${rows.length} of ${DATA.rows.length} complete rows`));
+if(method=='rm')return rmRun(rows,dv,o,tt);
+if(method=='welch')return welchRun(rows,dv[0],fa[0],o,tt);
+const G=glm(rows,dv,fa,co);if(!G)throw Error(T('คำนวณไม่ได้ (ข้อมูลอาจมีเซลล์ว่าง/ตัวแปรสัมพันธ์กันสมบูรณ์/จำนวนข้อมูลน้อยไป)','Cannot compute (empty cells, collinearity or too little data)'));
+const cells=grp(rows,fa),ck=[...cells.keys()],t95=g=>tq(g.length-1)*sd(g)/Math.sqrt(g.length);
+// descriptives
+const dr=[];cells.forEach((g,k)=>dv.forEach(d=>{const v=g.map(r=>r[d]);dr.push([k,d,v.length,f(mean(v)),f(sd(v)),f(mean(v)-t95(v)),f(mean(v)+t95(v))])}));
+tt(T('สถิติเชิงพรรณนา (ค่าเฉลี่ย, ส่วนเบี่ยงเบนมาตรฐาน, ช่วงเชื่อมั่น 95%)','Descriptive statistics (mean, SD, 95% CI)'),[T('กลุ่ม','Group'),'DV','n','Mean','SD','CI low','CI high'],dr);
+o.notes.push(T('ตารางพรรณนาแสดงค่าเฉลี่ยของแต่ละกลุ่ม (เซลล์) ใช้เปรียบเทียบภาพรวมก่อนดูการทดสอบนัยสำคัญ','Descriptives summarise each group/cell; inspect them before the significance tests.'));
+// Levene
+const lv=dv.map(d=>{const g=[...cells.values()].map(a=>{const v=a.map(r=>r[d]),m=mean(v);return v.map(x=>Math.abs(x-m))});const q=owF(g);return[d,f(q.F),q.d1,q.d2,pf(q.p),q.p<.05?T('ความแปรปรวนไม่เท่ากัน','unequal variances'):T('ความแปรปรวนเท่ากัน','equal variances')]});
+tt(T('การทดสอบ Levene (ความเท่ากันของความแปรปรวน)','Levene test (homogeneity of variance)'),['DV','F','df1','df2','p',T('สรุป','Conclusion')],lv);
+o.notes.push(T('Levene: ถ้า p > .05 แสดงว่าสมมติฐานความแปรปรวนเท่ากันเป็นจริง หากไม่เป็นจริงควรระมัดระวังการตีความ (หรือใช้ Welch ANOVA)','Levene: p > .05 supports equal variances; otherwise interpret with caution (or use Welch ANOVA).'));
+// ANOVA per DV
+const MSE=[],ETA=[];dv.forEach((d,j)=>{const y=rows.map(r=>r[d]),sst=sum(y.map(v=>(v-mean(y))**2)),sse=G.E[j][j],mse=sse/G.dfe;MSE.push(mse);const R=[],ssm=sst-sse,Fm=(ssm/G.dfm)/mse;
+R.push([T('โมเดลที่ปรับแล้ว','Corrected Model'),f(ssm),G.dfm,f(ssm/G.dfm),f(Fm),pf(pF(Fm,G.dfm,G.dfe)),f(ssm/sst)]);const et=[];
+G.terms.forEach(t=>{const ss=t.H[j][j],F=ss/t.df/mse,p=pF(F,t.df,G.dfe),e=ss/(ss+sse);et.push(e);R.push([t.name,f(ss),t.df,f(ss/t.df),f(F),pf(p),f(e)]);o.notes.push(`[${d}] `+say(t.name,F,t.df,G.dfe,p,e))});
+R.push([T('ความคลาดเคลื่อน','Error'),f(sse),G.dfe,f(mse),'','','']);R.push([T('รวม (ปรับแล้ว)','Corrected Total'),f(sst),rows.length-1,'','','','']);ETA.push(et);
+tt(T('ตาราง ANOVA (Type III SS) ตัวแปรตาม: ','ANOVA table (Type III SS) DV: ')+d,ZH(),R)});
+o.notes.push(T('η²p (partial eta squared) คือขนาดอิทธิพล: .01 เล็ก, .06 ปานกลาง, .14 ใหญ่','η²p = effect size: .01 small, .06 medium, .14 large.'));
+if(co.length)o.notes.push(T('ANCOVA/MANCOVA: ค่าสถิติของ Factor ถูกปรับด้วยตัวแปรร่วมแล้ว ควรตรวจสอบสมมติฐานความเท่ากันของความชัน (ไม่มีปฏิสัมพันธ์ระหว่าง Factor กับ Covariate) จากกราฟเส้นถดถอย','Factor effects are adjusted for covariates; check homogeneity of regression slopes using the regression-line plot.'));
+// multivariate
+if(dv.length>1){const p=dv.length,v=G.dfe,mr=[];G.terms.forEach(t=>{const q=t.df,E=G.E,H=t.H,EH=E.map((r,i)=>r.map((x,j)=>x+H[i][j])),L=det(E)/det(EH),w=v+q-(p+q+1)/2,tt_=p*p+q*q-5>0?Math.sqrt((p*p*q*q-4)/(p*p+q*q-5)):1,d1=p*q,d2=w*tt_-(d1-2)/2,L1=Math.pow(L,1/tt_),Fw=(1-L1)/L1*d2/d1;
+const V=sum(mm(H,inv(EH)).map((r,i)=>r[i])),s=Math.min(p,q),m=(Math.abs(p-q)-1)/2,n=(v-p-1)/2,Fp=(2*n+s+1)/(2*m+s+1)*V/(s-V),a=s*(2*m+s+1),b=s*(2*n+s+1);
+mr.push([t.name,'Wilks Λ',f(L,4),f(Fw),f(d1,0),f(d2,1),pf(pF(Fw,d1,d2)),f(1-Math.pow(L,1/s))]);mr.push(['','Pillai V',f(V,4),f(Fp),f(a,0),f(b,0),pf(pF(Fp,a,b)),f(V/s)]);
+o.notes.push(`<b>${t.name}</b> (Wilks): F(${f(d1,0)}, ${f(d2,1)}) = ${f(Fw)}, p = ${pf(pF(Fw,d1,d2))} → `+(pF(Fw,d1,d2)<.05?T('มีผลต่อ DV โดยรวมอย่างมีนัยสำคัญ (ดู ANOVA รายตัวแปรประกอบ)','significant joint effect on the DVs (see univariate ANOVAs)'):T('ไม่มีผลต่อ DV โดยรวมอย่างมีนัยสำคัญ','no significant joint effect on the DVs')))});
+tt(T('การทดสอบหลายตัวแปร (Multivariate Tests)','Multivariate tests'),[T('เอฟเฟกต์','Effect'),T('สถิติ','Statistic'),T('ค่า','Value'),'F','df1','df2','p','η²p'],mr)}
+// post hoc
+fa.forEach(a=>{const gs=grp(rows,[a]),ks=[...gs.keys()];if(ks.length<3)return;dv.forEach((d,j)=>{const pr=pm(ks).map(([x,y])=>{const u=gs.get(x).map(r=>r[d]),w=gs.get(y).map(r=>r[d]),df=mean(u)-mean(w),se=Math.sqrt(MSE[j]*(1/u.length+1/w.length)),t=df/se,p=pT(t,G.dfe),k=pm(ks).length;return[x+' vs '+y,f(df),f(se),f(t),pf(p),pf(Math.min(1,p*k))]});
+tt(T(`การเปรียบเทียบเชิงซ้อน (Bonferroni) ของ ${a} ตัวแปร ${d}`,`Post-hoc (Bonferroni) for ${a}, DV ${d}`),[T('คู่เปรียบเทียบ','Pair'),T('ผลต่างเฉลี่ย','Mean diff'),'SE','t','p',T('p ปรับ','p adj.')],pr)})});
+if(ks=>0);
+// charts
+const mk=(id,title,desc,cfg)=>o.charts.push({id,title,desc,cfg}),col=['#3b5bdb','#e8590c','#2f9e44','#ae3ec9','#f08c00','#1098ad','#d6336c','#495057'];
+mk('c1',T('ค่าเฉลี่ยของแต่ละกลุ่ม พร้อม 95% CI','Group means with 95% CI'),T('แท่งคือค่าเฉลี่ย เส้นดำคือช่วงเชื่อมั่น 95% ถ้าช่วงของสองกลุ่มไม่ทับซ้อนกันมาก แสดงว่าน่าจะแตกต่างกัน','Bars are means; black whiskers are 95% CIs. Little overlap suggests a real difference.'),{type:'bar',data:{labels:ck,datasets:dv.map((d,j)=>{const g=[...cells.values()].map(a=>a.map(r=>r[d]));return{label:d,data:g.map(mean),err:g.map(t95),backgroundColor:col[j%8]+'aa'}})}});
+if(fa.length>=2){const l1=[...new Set(rows.map(r=>r[fa[0]]))].sort(),l2=[...new Set(rows.map(r=>r[fa[1]]))].sort();
+mk('c2',T(`กราฟปฏิสัมพันธ์: ${fa[0]} × ${fa[1]}`,`Interaction plot: ${fa[0]} × ${fa[1]}`),T('เส้นที่ขนานกันแสดงว่าไม่มีปฏิสัมพันธ์ ถ้าเส้นตัดกันหรือไม่ขนานแสดงว่าผลของ Factor หนึ่งขึ้นกับระดับของอีก Factor','Parallel lines suggest no interaction; crossing/non-parallel lines suggest that one factor’s effect depends on the other.'),{type:'line',data:{labels:l1,datasets:l2.map((b,i)=>({label:fa[1]+'='+b,borderColor:col[i%8],backgroundColor:col[i%8],data:l1.map(a=>{const v=rows.filter(r=>r[fa[0]]==a&&r[fa[1]]==b).map(r=>r[dv[0]]);return v.length?mean(v):null})}))}})}
+const rs=G.res.map(r=>r[0]),ft=G.fit.map(r=>r[0]),sr=rs.map(x=>x/Math.sqrt(MSE[0])),mn=Math.min(...sr),mx=Math.max(...sr),B=10,w=(mx-mn)/B||1,h=Array(B).fill(0);sr.forEach(x=>h[Math.min(B-1,Math.floor((x-mn)/w))]++);
+mk('c3',T('ฮิสโทแกรมของเศษเหลือ (มาตรฐาน)','Histogram of standardized residuals'),T('ควรมีรูประฆังคว่ำใกล้เคียงโค้งปกติ จึงจะเป็นไปตามสมมติฐานการแจกแจงปกติ','Should look roughly bell-shaped, supporting normality of residuals.'),{type:'bar',data:{labels:h.map((_,i)=>f(mn+w*(i+.5),2)),datasets:[{label:'Frequency',data:h,backgroundColor:'#3b5bdbaa'}]}});
+const so=[...sr].sort((a,b)=>a-b);
+mk('c4','Normal Q-Q Plot',T('จุดควรอยู่ใกล้เส้นตรง 45° หากเป็นไปตามสมมติฐานการแจกแจงปกติของเศษเหลือ','Points should lie near the 45° line if residuals are normal.'),{type:'scatter',data:{datasets:[{label:'Residuals',data:so.map((y,i)=>({x:nq((i+.5)/so.length),y})),backgroundColor:'#3b5bdb'},{label:'y=x',type:'line',data:[{x:-3,y:-3},{x:3,y:3}],borderColor:'#e03131',pointRadius:0}]},options:{scales:{x:{title:{display:true,text:'Theoretical'}},y:{title:{display:true,text:'Sample'}}}}});
+mk('c5',T('เศษเหลือเทียบกับค่าที่คาดการณ์','Residuals vs Fitted'),T('จุดควรกระจายสม่ำเสมอรอบ 0 ไม่เป็นรูปกรวยหรือโค้ง หากเป็นแสดงว่าความแปรปรวนไม่คงที่หรือโมเดลไม่เหมาะสม','Points should scatter evenly around 0 with no funnel/curve (constant variance, adequate model).'),{type:'scatter',data:{datasets:[{label:'Residual',data:ft.map((x,i)=>({x,y:rs[i]})),backgroundColor:'#e8590c'}]},options:{scales:{x:{title:{display:true,text:'Fitted'}},y:{title:{display:true,text:'Residual'}}}}});
+mk('c6',T('ขนาดอิทธิพล η²p ของแต่ละเทอม','Partial η² by term'),T('แท่งที่สูงกว่าหมายถึงเทอมนั้นอธิบายความแปรปรวนได้มากกว่า (เกณฑ์ .01/.06/.14)','Taller bars mean the term explains more variance (benchmarks .01/.06/.14).'),{type:'bar',data:{labels:G.terms.map(t=>t.name),datasets:dv.map((d,j)=>({label:d,data:ETA[j],backgroundColor:col[j%8]+'aa'}))}});
+if(co.length){const gs=grp(rows,[fa[0]]);mk('c7',T(`ตัวแปรร่วม ${co[0]} กับ ${dv[0]} แยกตาม ${fa[0]}`,`${co[0]} vs ${dv[0]} by ${fa[0]}`),T('เส้นถดถอยของแต่ละกลุ่มควรขนานกันโดยประมาณ (สมมติฐานความชันเท่ากัน) และตัวแปรร่วมควรมีความสัมพันธ์เชิงเส้นกับ DV','Group regression lines should be roughly parallel (equal slopes) and linear in the covariate.'),{type:'scatter',data:{datasets:[...gs].flatMap(([k,g],i)=>{const x=g.map(r=>r[co[0]]),y=g.map(r=>r[dv[0]]),mx=mean(x),my=mean(y),b=sum(x.map((v,q)=>(v-mx)*(y[q]-my)))/sum(x.map(v=>(v-mx)**2)),x0=Math.min(...x),x1=Math.max(...x);
+return[{label:k,data:g.map(r=>({x:r[co[0]],y:r[dv[0]]})),backgroundColor:col[i%8]},{label:k+' fit',type:'line',data:[{x:x0,y:my+b*(x0-mx)},{x:x1,y:my+b*(x1-mx)}],borderColor:col[i%8],pointRadius:0}]})},options:{scales:{x:{title:{display:true,text:co[0]}},y:{title:{display:true,text:dv[0]}}}}})}
+return o}
+function welchRun(rows,d,a,o,tt){const gs=grp(rows,[a]),g=[...gs.values()].map(x=>x.map(r=>r[d])),k=g.length;if(k<2)throw Error('Need ≥2 groups');const n=g.map(x=>x.length),m=g.map(mean),v=g.map(x=>sd(x)**2),w=n.map((x,i)=>x/v[i]),W=sum(w),mw=sum(w.map((x,i)=>x*m[i]))/W,A=sum(w.map((x,i)=>x*(m[i]-mw)**2))/(k-1),s=sum(w.map((x,i)=>(1-x/W)**2/(n[i]-1))),F=A/(1+2*(k-2)/(k*k-1)*s),d2=(k*k-1)/(3*s),p=pF(F,k-1,d2);
+tt('Welch ANOVA',['F','df1','df2','p'],[[f(F),k-1,f(d2,2),pf(p)]]);tt(T('สถิติเชิงพรรณนา','Descriptives'),[T('กลุ่ม','Group'),'n','Mean','SD'],[...gs.keys()].map((x,i)=>[x,n[i],f(m[i]),f(Math.sqrt(v[i]))]));
+o.notes.push(`Welch F(${k-1}, ${f(d2,1)}) = ${f(F)}, p = ${pf(p)} → `+(p<.05?T('ค่าเฉลี่ยระหว่างกลุ่มแตกต่างกันอย่างมีนัยสำคัญ (โดยไม่ต้องสมมติความแปรปรวนเท่ากัน)','group means differ significantly (no equal-variance assumption)'):T('ค่าเฉลี่ยระหว่างกลุ่มไม่แตกต่างกันอย่างมีนัยสำคัญ','no significant difference between group means')));
+const t95=x=>tq(x.length-1)*sd(x)/Math.sqrt(x.length);o.charts.push({id:'w1',title:T('ค่าเฉลี่ยกลุ่ม พร้อม 95% CI','Group means with 95% CI'),desc:T('แท่งคือค่าเฉลี่ย เส้นดำคือ 95% CI','Bars = means, whiskers = 95% CI'),cfg:{type:'bar',data:{labels:[...gs.keys()],datasets:[{label:d,data:m,err:g.map(t95),backgroundColor:'#3b5bdbaa'}]}}});return o}
+function rmRun(rows,dv,o,tt){const n=rows.length,k=dv.length,X=rows.map(r=>dv.map(d=>r[d])),gm=mean(X.flat()),cm=dv.map((_,j)=>mean(X.map(r=>r[j]))),sm=X.map(mean),ssc=n*sum(cm.map(m=>(m-gm)**2)),sss=k*sum(sm.map(m=>(m-gm)**2)),sst=sum(X.flat().map(v=>(v-gm)**2)),sse=sst-ssc-sss,d1=k-1,d2=(n-1)*(k-1),F=(ssc/d1)/(sse/d2),p=pF(F,d1,d2),e=ssc/(ssc+sse);
+const S=dv.map((_,a)=>dv.map((_,b)=>sum(X.map(r=>(r[a]-cm[a])*(r[b]-cm[b])))/(n-1))),md=mean(S.map((r,i)=>r[i])),ma=mean(S.flat()),rm=S.map(mean),eps=Math.min(1,Math.max(1/(k-1),k*k*(md-ma)**2/((k-1)*(sum(S.flat().map(v=>v*v))-2*k*sum(rm.map(v=>v*v))+k*k*ma*ma)))),pg=pF(F,eps*d1,eps*d2);
+tt(T('ตาราง ANOVA การวัดซ้ำ','Repeated-measures ANOVA table'),ZH(),[[T('เวลา/เงื่อนไข','Within factor'),f(ssc),d1,f(ssc/d1),f(F),pf(p),f(e)],[T('ผู้เข้าร่วม','Subjects'),f(sss),n-1,'','','',''],[T('ความคลาดเคลื่อน','Error'),f(sse),d2,f(sse/d2),'','',''],[T('รวม','Total'),f(sst),n*k-1,'','','','']]);
+tt(T('การแก้ค่า Sphericity (Greenhouse-Geisser)','Sphericity correction (Greenhouse-Geisser)'),['ε (GG)','df1','df2','F','p (GG)'],[[f(eps,4),f(eps*d1,2),f(eps*d2,2),f(F),pf(pg)]]);
+tt(T('สถิติเชิงพรรณนา','Descriptives'),['Condition','n','Mean','SD','CI low','CI high'],dv.map((d,j)=>{const v=X.map(r=>r[j]),h=tq(n-1)*sd(v)/Math.sqrt(n);return[d,n,f(cm[j]),f(sd(v)),f(cm[j]-h),f(cm[j]+h)]}));
+const pr=[];dv.forEach((a,i)=>dv.forEach((b,j)=>{if(i<j){const df=X.map(r=>r[i]-r[j]),t=mean(df)/(sd(df)/Math.sqrt(n)),pp=pT(t,n-1),m=k*(k-1)/2;pr.push([a+' vs '+b,f(mean(df)),f(t),pf(pp),pf(Math.min(1,pp*m))])}}));tt(T('เปรียบเทียบรายคู่ (paired t, Bonferroni)','Pairwise (paired t, Bonferroni)'),[T('คู่','Pair'),T('ผลต่างเฉลี่ย','Mean diff'),'t','p',T('p ปรับ','p adj.')],pr);
+o.notes.push(say(T('เวลา/เงื่อนไข','Within factor'),F,d1,d2,p,e)+(eps<.75?T(` (ละเมิด sphericity ควรดูค่า GG: p = ${pf(pg)})`,` (sphericity violated; use GG p = ${pf(pg)})`):''));o.notes.push(T('ε (Greenhouse-Geisser) ใกล้ 1 แสดงว่าเป็นไปตามสมมติฐาน sphericity','ε (Greenhouse-Geisser) near 1 supports sphericity.'));
+const t95=j=>tq(n-1)*sd(X.map(r=>r[j]))/Math.sqrt(n);
+o.charts.push({id:'r1',title:T('โปรไฟล์ค่าเฉลี่ยตามเงื่อนไข (95% CI)','Mean profile across conditions (95% CI)'),desc:T('เส้นแสดงแนวโน้มการเปลี่ยนแปลงของค่าเฉลี่ยในแต่ละครั้งของการวัด','Shows how the mean changes across measurements.'),cfg:{type:'bar',data:{labels:dv,datasets:[{label:'Mean',data:cm,err:dv.map((_,j)=>t95(j)),backgroundColor:'#3b5bdbaa'}]}}});
+o.charts.push({id:'r2',title:T('เส้นรายบุคคล (Spaghetti plot)','Individual trajectories'),desc:T('แต่ละเส้นคือผู้เข้าร่วมหนึ่งคน ใช้ดูความแตกต่างระหว่างบุคคลและความสอดคล้องของแนวโน้ม','Each line is one subject; shows individual variation and trend consistency.'),cfg:{type:'line',data:{labels:dv,datasets:X.map((r,i)=>({label:'S'+(i+1),data:r,borderColor:'#3b5bdb44',pointRadius:1,borderWidth:1}))},options:{plugins:{legend:{display:false}}}}});return o}
+// ---- render
+Chart.register({id:'eb',afterDatasetsDraw(c){const x=c.ctx,y=c.scales.y;c.data.datasets.forEach((d,i)=>{if(!d.err)return;c.getDatasetMeta(i).data.forEach((el,j)=>{const m=d.data[j],e=d.err[j],a=y.getPixelForValue(m+e),b=y.getPixelForValue(m-e);x.save();x.strokeStyle='#000';x.beginPath();x.moveTo(el.x,a);x.lineTo(el.x,b);x.moveTo(el.x-5,a);x.lineTo(el.x+5,a);x.moveTo(el.x-5,b);x.lineTo(el.x+5,b);x.stroke();x.restore()})})}},{id:'bg',beforeDraw(c){const x=c.ctx;x.save();x.globalCompositeOperation='destination-over';x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.restore()}});
+function destroy(){charts.forEach(c=>c.destroy());charts=[]}
+let CUR=null;
+function render(o){CUR=o;let h=`<div class="card"><h2>${T('ผลการวิเคราะห์','Results')} — ${M[method][0]}</h2><button class="pr" onclick="dlX()">⬇ ${T('ดาวน์โหลดตารางเป็น Excel','Download tables (Excel)')}</button>`;
+o.tables.forEach(t=>{h+=`<h3>${t.t}</h3><div class="tb"><table><tr>${t.head.map(x=>`<th>${x}</th>`).join('')}</tr>${t.rows.map(r=>`<tr>${r.map(x=>`<td>${x}</td>`).join('')}</tr>`).join('')}</table></div>`});
+h+=`<h3>${T('คำอธิบายผล','Interpretation')}</h3><ul>${o.notes.map(n=>`<li>${n}</li>`).join('')}</ul></div><div class="card"><h2>${T('กราฟ','Charts')}</h2>`;
+o.charts.forEach(c=>h+=`<div class="ch"><h3>${c.title}</h3><canvas id="${c.id}"></canvas><div><button onclick="dlP('${c.id}')">⬇ PNG</button></div><div class="cd">${c.desc}</div></div>`);$('out').innerHTML=h+'</div>';
+o.charts.forEach(c=>{c.cfg.options=Object.assign({responsive:true,animation:false},c.cfg.options);charts.push(new Chart($(c.id),c.cfg))})}
+function dlP(id){const c=charts.find(x=>x.canvas.id==id),a=document.createElement('a');a.href=c.toBase64Image('image/png',1);a.download=id+'.png';a.click()}
+function dlX(){const wb=XLSX.utils.book_new();CUR.tables.forEach((t,i)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([[t.t.replace(/<[^>]+>/g,'')],t.head,...t.rows]),('T'+(i+1)+' '+t.t).replace(/[:\\\/?*\[\]]/g,'').slice(0,31)));
+XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(CUR.notes.map(n=>[n.replace(/<[^>]+>/g,'')])),'Interpretation');XLSX.writeFile(wb,'anova_results.xlsx')}
+$('run').onclick=run;$('lt').onclick=()=>setLang('th');$('le').onclick=()=>setLang('en');
+$('rs').onclick=()=>{destroy();DATA=null;sample=false;LAST=null;CUR=null;$('fi').value='';['sDV','sF','sC'].forEach(i=>$(i).innerHTML='');$('out').innerHTML='';method='oneway';setLang(lang)};
+setLang('th');
+</script></body></html>
